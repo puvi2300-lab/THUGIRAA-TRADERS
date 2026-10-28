@@ -170,7 +170,7 @@ function statsHTML(){
 }
 
 function stockHTML(){
-  const miss=starter().filter(x=>!S.products.some(p=>secOf(p)==="STATIONERY"&&p.name.toLowerCase()===x.name.toLowerCase()));
+  const miss=starterMissing(),msum=Object.entries(miss.reduce((a,x)=>{const b=varOf(x).base;a[b]=(a[b]||0)+1;return a;},{})).map(([b,n])=>b+" ("+n+")").join(", ");
   return `<div class="card"><b>Add new item</b><div class="grid">
   <select id="psec">${SECS.map(x=>`<option ${x===osec?"selected":""}>${x}</option>`).join("")}</select>
   <input id="pc" list="cl" placeholder="Sub-category (e.g. LEXA, FANCY, BOOKS, GLUE)"><datalist id="cl">${[...new Set(SECS.flatMap(cats))].sort().map(c=>`<option value="${esc(c)}">`).join("")}</datalist>
@@ -180,7 +180,7 @@ function stockHTML(){
   <div class="two"><input id="pb" type="number" inputmode="decimal" step="0.01" placeholder="Ex Dealer (billing price)"><input id="pm" type="number" inputmode="decimal" step="0.01" placeholder="MRP"></div>
   <button class="pri" data-act="addprod">Add item</button></div>
   <div class="mute" style="margin-top:6px">If you type variants, one item is made for each (e.g. "EX 40P", "EX 80P") with the same stock and prices. Edit each one below.</div></div>
-  ${miss.length?`<div class="card"><b>Stationery starter items</b><div class="mute">Adds the missing starter items (${miss.length}) with stock 0 and price 0: EX, B5, CR, EX PLAIN, SINGLE SQUARE (40P-200P), Serviette Tissue, Clear Glue. Set prices after.</div><p><button class="pri" data-act="seedst">Add ${miss.length} starter items</button></p></div>`:""}
+  ${miss.length?`<div class="card"><b>Stationery starter items</b><div class="mute">Will add (stock 0, price 0): ${esc(msum)}. They go in the same sub-category as your EX items. Set the prices after.</div><p><button class="pri" data-act="seedst">Add ${miss.length} starter items</button></p></div>`:""}
   <div class="card"><div class="two"><input data-f="sq" placeholder="Search items" value="${esc(sq)}"><select data-f="sf"><option value="all" ${sf=="all"?"selected":""}>All items</option><option value="low" ${sf=="low"?"selected":""}>Low stock (10 or less)</option><option value="out" ${sf=="out"?"selected":""}>Out of stock</option></select></div><p style="margin:8px 0 0"><button class="sm" data-act="csvstock">Download stock (CSV)</button></p></div>
   <div class="card scroll"><table><thead><tr><th>Item</th><th>Stock</th><th>Add stock</th><th>Ex Factory</th><th>Ex Dealer (bill price)</th><th>MRP</th><th></th></tr></thead><tbody id="srows">${stockRows()}</tbody></table></div><p class="mute">Ex Dealer price is the billing price used on bills. Changes save when you leave a field. Red = out of stock, orange = 10 or fewer left.</p>`;
 }
@@ -481,15 +481,18 @@ function saveEdit(id){
   if(!n||!c){alert("Enter the name and sub-category.");return;}
   db.doc("products/"+id).update({name:n,sec:$("#es").value,cat:c,ord:Math.floor(+$("#eo").value||0)}).then(()=>$("#dlg").close()).catch(err);
 }
+const nrm=x=>String(x).toUpperCase().replace(/\s+/g,"");
+function starterMissing(){return starter().filter(x=>!S.products.some(p=>secOf(p)==="STATIONERY"&&nrm(p.name)===nrm(x.name)));}
 function starter(){
+  const ex=S.products.find(p=>secOf(p)==="STATIONERY"&&["EX","B5","CR","EXPLAIN"].includes(nrm(varOf(p).base))),bc=ex?catOf(ex):"BOOKS";
   const L=[],A=["40P","80P","120P","160P","200P"],B=A.slice(1);
-  [["EX",A],["B5",B],["CR",B],["EX PLAIN",A],["SINGLE SQUARE",A]].forEach(([n,gs],bi)=>gs.forEach(g=>L.push({cat:"BOOKS",ord:bi+1,name:n+" "+g})));
+  [["EX",A],["B5",B],["CR",B],["EX PLAIN",A],["SINGLE SQUARE",A]].forEach(([n,gs],bi)=>gs.forEach(g=>L.push({cat:bc,ord:bi+1,name:n+" "+g})));
   ["Small","Large"].forEach((z,i)=>L.push({cat:"SERVIETTE TISSUE",ord:i+1,name:"Serviette Tissue "+z}));
   ["25ml","50ml"].forEach(z=>L.push({cat:"CLEAR GLUE",name:"Clear Glue "+z}));
   return L;
 }
 async function seedSt(){
-  const L=starter().filter(x=>!S.products.some(p=>secOf(p)==="STATIONERY"&&p.name.toLowerCase()===x.name.toLowerCase()));
+  const L=starterMissing();
   if(!L.length){msg=note("All starter items already exist.","ok");render(true);return;}
   const b=db.batch(),t0=Date.now().toString(36);
   L.forEach((x,i)=>{const id="s"+t0+i;b.set(db.doc("products/"+id),{id,sec:"STATIONERY",cat:x.cat,ord:x.ord||0,name:x.name,stock:0,cost:0,price:0,mrp:0});});
