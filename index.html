@@ -124,7 +124,7 @@ const SECS=["FANCY","STATIONERY"],PRE={FANCY:"FN",STATIONERY:"ST"},secOf=p=>p.se
 const HEAD={FANCY:{t:"THUGIRAA TRADERS (PVT) (LTD)"},STATIONERY:{t:"SUPERIOR",s:"Designed for brilliance",d:"Authorized Distributor - Thugiraa Traders"}};
 const PAY=["Cash","Credit","Cheque"],CODEP={FANCY:"TTF",STATIONERY:"TTS"};
 const maxCode=sc=>Math.max(0,...S.products.filter(p=>secOf(p)===sc&&p.code).map(p=>parseInt(String(p.code).replace(/\D/g,""))||0));
-const varOf=p=>{const m=p.name.trim().match(/^(.+?)\s+(\d+(?:\.\d+)?\s?[A-Za-z]{0,4}|small|medium|large)$/i);return m?{base:m[1].trim(),v:m[2].trim()}:{base:p.name.trim(),v:""};};
+const varOf=p=>{if(p.base)return {base:p.base,v:p.var||""};const m=p.name.trim().match(/^(.+?)\s+(\d+(?:\.\d+)?\s?[A-Za-z]{0,4}|small|medium|large)$/i);return m?{base:m[1].trim(),v:m[2].trim()}:{base:p.name.trim(),v:""};};
 const mrpOf=i=>i.mrp||(prodById(i.pid)||{}).mrp||0;
 const due=o=>o.status==="active"&&o.paid!=null?Math.max(0,o.total-o.paid):0;
 const shopAd=()=>S.shop.addr||"No: 43A, Jeyanthinagar, Kilinochchi",shopTl=()=>S.shop.tel||"0742770666";
@@ -171,7 +171,7 @@ function statsHTML(){
 }
 
 function stockHTML(){
-  return `<div class="card"><b>Add new item</b><div class="grid">
+  return `${importCard()}<div class="card"><b>Add new item</b><div class="grid">
   <select id="psec">${SECS.map(x=>`<option ${x===osec?"selected":""}>${x}</option>`).join("")}</select>
   <input id="pc" list="cl" placeholder="Category (FANCY or LEXA for fancy items)"><datalist id="cl">${[...new Set(SECS.flatMap(cats))].sort().map(c=>`<option value="${esc(c)}">`).join("")}</datalist>
   <input id="pn" placeholder="Item name (e.g. EX, Clear Glue, Box file)">
@@ -229,8 +229,8 @@ function plistHTML(){
   if(!list.length)return '<span class="mute">No items found. Admin can add items in the Stock tab.</span>';
   const inp=p=>{const q=cart[p.id]||0;return `<div class="step"><button data-act="dec" data-v="${p.id}" ${q?"":"disabled"}>-</button><input type="number" inputmode="numeric" min="0" data-id="${p.id}" data-f="qty" value="${q||""}" placeholder="0" class="${q>p.stock?"over":""}"><button data-act="inc" data-v="${p.id}" ${p.stock>0?"":"disabled"}>+</button></div>`;};
   const price=p=>`Rs ${fmt(p.price)} | MRP ${p.mrp?fmt(p.mrp):"-"}`;
-  const row=p=>`<div class="prod"><div><b>${esc(p.name)}</b>${p.code?` <span class="badge">${esc(p.code)}</span>`:""}<div class="mute">${p.stock>0?"In stock: "+p.stock:"Out of stock"}</div><div class="mute">${price(p)}</div>${offerHint(p)}</div>${inp(p)}</div>`;
-  const cell=p=>`<div class="vc"><b>${esc(varOf(p).v||p.name)}</b>${p.code?`<div class="mute">${esc(p.code)}</div>`:""}<div class="mute">${p.stock>0?"Stock "+p.stock:"Out of stock"}</div><div class="mute">${price(p)}</div>${offerHint(p)}${inp(p)}</div>`;
+  const row=p=>`<div class="prod"><div><b>${esc(p.name)}</b>${p.code?` <span class="badge">${esc(p.code)}</span>`:""}<div class="mute">${p.stock>0?"In stock: "+p.stock+(p.unit?" "+p.unit:""):"Out of stock"}</div><div class="mute">${price(p)}</div>${offerHint(p)}</div>${inp(p)}</div>`;
+  const cell=p=>`<div class="vc"><b>${esc(varOf(p).v||p.name)}</b>${p.code?`<div class="mute">${esc(p.code)}</div>`:""}<div class="mute">${p.stock>0?"Stock "+p.stock+(p.unit?" "+p.unit:""):"Out of stock"}</div><div class="mute">${price(p)}</div>${offerHint(p)}${inp(p)}</div>`;
   const G=[],ix={};
   list.forEach(p=>{const c=catOf(p),b=varOf(p).base,k=c+"|"+b.toLowerCase();if(ix[k]==null){ix[k]=G.length;G.push({c,b,L:[]});}G[ix[k]].L.push(p);});
   let h="",lc="";
@@ -286,6 +286,7 @@ function startListening(){
   const adm=user.role==="admin";
   unsubs.push(db.collection("products").onSnapshot(s=>{S.products=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>secOf(a).localeCompare(secOf(b))||catOf(a).localeCompare(catOf(b))||(a.ord||0)-(b.ord||0)||a.name.localeCompare(b.name,undefined,{numeric:true}));render();},listenErr));
   unsubs.push(db.collection("offers").onSnapshot(s=>{S.offers=s.docs.map(d=>({id:d.id,...d.data()}));render();},listenErr));
+  unsubs.push(db.doc("meta/setup").onSnapshot(d=>{S.setup=d.exists?d.data():{};render();},()=>{}));
   unsubs.push(db.doc("meta/shop").onSnapshot(d=>{S.shop=d.exists?d.data():{};render();},()=>{}));
   const q=adm?db.collection("orders").orderBy("time","desc").limit(500):db.collection("orders").where("repId","==",user.uid).limit(200);
   unsubs.push(q.onSnapshot(s=>{S.orders=s.docs.map(d=>d.data()).sort((a,b)=>b.time-a.time);render();},listenErr));
@@ -453,7 +454,7 @@ function stockRows(){
     const gk=secOf(p)+" / "+catOf(p);if(gk!==last){h+=`<tr class="grp"><td colspan="8">${esc(gk)}</td></tr>`;last=gk;lb="";}
     const b=varOf(p).base,k=catOf(p)+"|"+b.toLowerCase();if(k!==lb){if(cnt[k]>1)h+=`<tr class="sub"><td colspan="8">${esc(b)}</td></tr>`;lb=k;}
     const cl=p.stock==0?"zero":p.stock<=10?"low":"",I=(f,v,x)=>`<td><input type="number" min="0" step="0.01" data-id="${p.id}" data-f="${f}" value="${v}" ${x||""}></td>`;
-    h+=`<tr><td>${esc(p.code||"-")}</td><td>${esc(p.name)}</td>${I("stock",p.stock,`class="${cl}"`)}<td><input type="number" min="0" placeholder="+ qty" data-id="${p.id}" data-f="add"></td>${I("cost",p.cost)}${I("price",p.price)}${I("mrp",p.mrp)}
+    h+=`<tr><td>${esc(p.code||"-")}</td><td>${esc(p.name)}${p.unit?` <span class="mute">(${esc(p.unit)})</span>`:""}</td>${I("stock",p.stock,`class="${cl}"`)}<td><input type="number" min="0" placeholder="+ qty" data-id="${p.id}" data-f="add"></td>${I("cost",p.cost)}${I("price",p.price)}${I("mrp",p.mrp)}
     <td style="white-space:nowrap"><button class="sm" data-act="edit" data-v="${p.id}">Edit</button> <button class="sm" data-act="delprod" data-v="${p.id}">Delete</button></td></tr>`;
   });
   return h||'<tr><td colspan="8" class="mute">No items found.</td></tr>';
@@ -470,6 +471,25 @@ function billList(){
     ${(o.less||o.ret)?`<div class="mute">Gross ${money(o.gross)}, Discount ${money(o.less)}, Return ${money(o.ret)}</div>`:""}
     ${o.status=="cancelled"?`<div class="mute">Reason: ${esc(o.reason)}${o.note?" - "+esc(o.note):""}<br>Returned to stock: ${sum(o.items,i=>i.back||0)} pcs. Lost / damaged: ${money(o.lost)}</div>`:""}
   </div>`;}).join("");
+}
+const IMPORT=[["TAPE","Binding tape","Red",72,"pc"],["TAPE","Binding tape","Green",36,"pc"],["TAPE","Binding tape","Black",72,"pc"],["TAPE","Binding tape","Blue",72,"pc"],["TAPE","Masking tape","",205,""],["TAPE","Wiring tape","Pack",12,"pack"],["TAPE","Wiring tape","Pc",7,"pc"],["TAPE","Sponge tape","1 inch",197,""],["TAPE","Sponge tape","2 inch",55,"pc"],["TAPE","Clear tape","80M",24,"pc"],["TAPE","Clear tape","200M",18,"pc"],["TAPE","Clear tape","500M",2,"pc"],["TAPE","Tan tape","50M",1,"pc"],["TAPE","Tan tape","80M",21,"pc"],["TAPE","Tan tape","200M",18,"pc"],["TAPE","Cello tape","1 inch 50M",18,"pc"],["TAPE","Cello tape","2 inch 25M",7,"pc"],["ERASER","Eraser","",29,""],["ERASER","White board eraser","",3,""],["ERASER","Animal eraser","",24,""],["ERASER","Fruit eraser","",34,""],["RULER","Steel ruler","",306,"pc"],["RULER","Ruler","15 cm",304,"pc"],["RULER","Ruler","30 cm",246,""],["PENCIL","Fancy pencil","",162,"box"],["PENCIL","Bottle pencil","",12,""],["PENCIL","Pencil sharpener","",0,""],["PENCIL","Colour pencil","5 pack",9,"pc"],["TIFFEX","Tiffex","Pen",20,"box"],["TIFFEX","Tiffex","Bottle",25,""],["MARKER","Highlighter","Purple",12,""],["MARKER","Highlighter","Blue",12,""],["MARKER","Highlighter","Orange",12,""],["MARKER","Highlighter","Pink",2,""],["MARKER","Highlighter","Green",8,""],["MARKER","CD marker","",22,""],["FILE","FC file","Green",5,""],["FILE","FC file","White",4,""],["FILE","FC file","Blue",4,""],["FILE","FC file","Grey",6,""],["FILE","FC file","Red",3,""],["FILE","FC file","Black",3,""],["FILE","FC file","Pink",5,""],["FILE","FC file","Orange",6,""],["FILE","FC file","Yellow",3,""],["FILE","File A4","Red",4,""],["FILE","File A4","Pink",2,""],["FILE","File A4","Black",7,""],["FILE","File A4","Light blue",3,""],["FILE","File A4","Orange",2,""],["FILE","File A4","Green",4,""],["FILE","File A4","Grey",4,""],["FILE","File A4","Yellow",1,""],["STICKER","Name sticker","Cinderella",4,""],["STICKER","Name sticker","Dora",4,""],["STICKER","Name sticker","Cartoon",4,""],["STICKER","Name sticker","Car",15,""],["STICKER","Name sticker","Spiderman",6,""],["STICKER","Name sticker","Cartoon bear",10,""],["STICKER","Name sticker","Lovely cat",10,""],["STICKER","Name sticker","Butterfly",1,""],["OFFICE","Bill book","",10,"pc"],["OFFICE","Note book","",70,"pc"],["OFFICE","Paper tray","",200,"pack"],["OFFICE","Rubber band","",100,"pack"],["OFFICE","Calculator","",40,""],["STAPLER","Stapler clip","Large",7,""],["STAPLER","Stapler clip","Small",0,""],["STAPLER","Stapler","DL0127",72,"pc"],["STAPLER","Stapler","DL0397",54,"pc"],["STAPLER","Stapler","DL0207",3,"pc"],["PIN","Push pin","",12,""],["PIN","Square pin","",0,""],["PIN","Office pin","",25,""],["PIN","Multi colour pin","",20,"box"],["PIN","White pin","",20,"box"],["PIN","Paper fastener","",9,""],["CRAFT","Glue gun","",24,"pc"],["CRAFT","Pastels","6 colour",10,"pc"],["CRAFT","Water colour","",35,""],["CRAFT","Bucket clay","Big",113,""],["CRAFT","IC stick","Colour",0,""],["CRAFT","IC stick","Normal",0,""],["PAPER","Bristol board","",0,""],["PAPER","Bristol board","Blue",68,""],["PAPER","Bristol board","Green",5,""],["PAPER","Bristol board","Pink",95,""],["PAPER","Colour paper 75 GSM","Black",22,""],["PAPER","Colour paper 80 GSM","",19,""],["PAPER","Colour paper 80 GSM","Orange",14,""],["PAPER","Colour paper 80 GSM","Brown",10,""],["ENVELOPE","Envelope","Small",6850,""],["ENVELOPE","Envelope","Big",4800,""],["ENVELOPE","Envelope","A4",350,""],["CUTTING","Scissors","",150,""],["CUTTING","Scissors","Small",48,"pc"],["CUTTING","Cutter","Box",32,""],["CUTTING","Cutter","Pc",69,""],["SCHOOL","Marshal mathematical box","",40,"pc"],["SCHOOL","Sri Lanka map","",8,"pack"],["COVER","My clear bag","White",10,"pack"],["COVER","My clear bag","Yellow",3,"pack"],["COVER","IC cover","",6,"pack"],["COVER","A5 cover","",28,""],["OTHER","Key tag","",750,""],["OTHER","Madakkai","",150,""],["LEXA","Lexa clear glue","25 ml",6,""],["LEXA","Lexa clear glue","100 ml",24,"pc"],["LEXA","Lexa multi colour sheet","80 GSM",34,""],["LEXA","Lexa fancy HB pencil","",105,""]];
+function importCard(){
+  if(user.role!=="admin"||(S.setup||{}).stock1)return "";
+  return `<div class="card"><b>Load starting stock list</b><div class="mute">Loads ${IMPORT.length} items (tapes, files, pencils, stickers, Lexa items and more) with your quantities, codes ${CODEP.FANCY}01 onwards and price 0. This DELETES all current stock items first. Bills are kept.</div><p><button class="pri" data-act="importstock">Load ${IMPORT.length} items</button></p></div>`;
+}
+async function importStock(){
+  if(!confirm("This will DELETE all current stock items and offers, then load "+IMPORT.length+" new items. Bills are kept. Continue?"))return;
+  try{
+    const old=[...(await db.collection("products").get()).docs,...(await db.collection("offers").get()).docs];
+    for(let i=0;i<old.length;i+=400){const b=db.batch();old.slice(i,i+400).forEach(d=>b.delete(d.ref));await b.commit();}
+    const t0=Date.now().toString(36),b=db.batch();
+    IMPORT.forEach(([c,base,v,q,u],i)=>{const id="f"+t0+i;b.set(db.doc("products/"+id),{id,sec:"FANCY",cat:c,base,var:v,name:v?base+" "+v:base,unit:u,stock:q,cost:0,price:0,mrp:0,ord:i+1,code:CODEP.FANCY+String(i+1).padStart(2,"0")});});
+    b.set(db.doc("meta/codes"),{FANCY:IMPORT.length,STATIONERY:0});
+    b.set(db.doc("meta/setup"),{stock1:true},{merge:true});
+    await b.commit();
+    cart={};freeCart={};msg=note(IMPORT.length+" items loaded with codes "+CODEP.FANCY+"01 to "+CODEP.FANCY+String(IMPORT.length).padStart(2,"0")+". Now set the prices in the Stock tab.","ok");
+  }catch(e){msg=note(e.message,"err");}
+  render(true);
 }
 async function mkCodes(){
   try{
@@ -494,7 +514,7 @@ function openEdit(id){
   const p=prodById(id);if(!p)return;
   $("#dlg").innerHTML=`<h3 style="margin-top:0">Edit item</h3>
   <label class="mute">Code</label><input id="ek" value="${esc(p.code||"")}"><label class="mute">Name</label><input id="en" value="${esc(p.name)}">
-  <label class="mute">Section</label><select id="es">${SECS.map(x=>`<option ${secOf(p)===x?"selected":""}>${x}</option>`).join("")}</select>
+  <label class="mute">Unit (pc, box, pack - optional)</label><input id="eu" value="${esc(p.unit||"")}"><label class="mute">Section</label><select id="es">${SECS.map(x=>`<option ${secOf(p)===x?"selected":""}>${x}</option>`).join("")}</select>
   <label class="mute">Sub-category</label><input id="ec" list="cl" value="${esc(catOf(p))}">
   <label class="mute">Display order (optional number, smaller shows first)</label><input id="eo" type="number" value="${p.ord||""}">
   <div class="row" style="margin-top:12px"><button data-act="close">Cancel</button><button class="pri" data-act="saveedit" data-v="${p.id}">Save</button></div>`;
@@ -504,7 +524,7 @@ function saveEdit(id){
   const n=$("#en").value.trim(),c=$("#ec").value.trim().toUpperCase();
   if(!n||!c){alert("Enter the name and sub-category.");return;}
   const k=$("#ek").value.trim().toUpperCase();if(k&&S.products.some(p=>p.id!==id&&p.code===k)){alert("This code is already used by another item.");return;}
-  db.doc("products/"+id).update({code:k,name:n,sec:$("#es").value,cat:c,ord:Math.floor(+$("#eo").value||0)}).then(()=>$("#dlg").close()).catch(err);
+  db.doc("products/"+id).update({code:k,name:n,unit:$("#eu").value.trim(),...(n!==(prodById(id)||{}).name?{base:null,var:null}:{}),sec:$("#es").value,cat:c,ord:Math.floor(+$("#eo").value||0)}).then(()=>$("#dlg").close()).catch(err);
 }
 function addPay(id){
   const o=S.orders.find(x=>x.id===id);if(!o)return;
@@ -549,6 +569,7 @@ document.addEventListener("click",e=>{
   else if(a=="wa")shareWA(+v);
   else if(a=="print")printBill(+v);
   else if(a=="wipe")wipeStock();
+  else if(a=="importstock")importStock();
   else if(a=="mkcodes")mkCodes();
   else if(a=="edit")openEdit(v);
   else if(a=="saveedit")saveEdit(v);
