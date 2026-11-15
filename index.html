@@ -185,7 +185,7 @@ function statsHTML(){
 }
 
 function stockHTML(){
-  return `${importCard()}${copyCard()}${moveCard()}<div class="card"><b>Add new item</b><div class="grid">
+  return `${importCard()}${copyCard()}${bookCard()}${moveCard()}<div class="card"><b>Add new item</b><div class="grid">
   <select id="psec">${SECS.map(x=>`<option ${x===osec?"selected":""}>${x}</option>`).join("")}</select>
   <input id="pc" list="cl" placeholder="Category (FANCY or LEXA for fancy items)"><datalist id="cl">${[...new Set(SECS.flatMap(cats))].sort().map(c=>`<option value="${esc(c)}">`).join("")}</datalist>
   <input id="pn" placeholder="Item name (e.g. EX, Clear Glue, Box file)">
@@ -565,6 +565,33 @@ async function addCopyItems(){
   }catch(e){msg=note("Could not add: "+e.message,"err");}
   render(true);
 }
+const BOOKLIST=[["EX SINGLE","40P"],["EX SQUARE","40P"],["EX SINGLE","80P"],["EX SQUARE","80P"],["EX SINGLE","120P"],["EX SQUARE","120P"],["EX SINGLE","160P"],["EX SQUARE","160P"],["EX SINGLE","200P"],["EX SQUARE","200P"],["B5 SINGLE","80P"],["B5 SQUARE","80P"],["B5 SINGLE","120P"],["B5 SQUARE","120P"],["B5 SINGLE","160P"],["B5 SQUARE","160P"],["B5 SINGLE","200P"],["B5 SQUARE","200P"],["CR SINGLE","40P"],["CR SQUARE","40P"],["CR SINGLE","80P"],["CR SQUARE","80P"],["CR SINGLE","120P"],["CR SQUARE","120P"],["CR SINGLE","160P"],["CR SQUARE","160P"],["CR SINGLE","200P"],["CR SQUARE","200P"]];
+function bookCard(){
+  if(user.role!=="admin"||(S.setup||{}).books3)return "";
+  return `<div class="card"><b>Add the copy varieties (EX, B5, CR) to STATIONERY and BOOKS</b><div class="mute">Adds ${BOOKLIST.length} items (EX, B5 and CR, Single and Square, 40P to 200P) to the STATIONERY section and also to the BOOKS section, with stock 0 and no prices. You type the stock and prices yourself in the table below. Items that already exist in a section are skipped, and your existing stock and prices are never changed.</div><p style="margin:8px 0 0"><button class="pri" data-act="addbooks2">Add to STATIONERY and BOOKS</button></p></div>`;
+}
+async function addBooks2(){
+  if(needNet())return;
+  const SC={STATIONERY:"COPY ITEMS",BOOKS:"COPY"},plan={};let total=0;
+  Object.keys(SC).forEach(sc=>{const have=new Set(S.products.filter(p=>secOf(p)===sc).map(p=>nz(p.name)));plan[sc]=BOOKLIST.filter(([b,v])=>!have.has(nz(b+" "+v)));total+=plan[sc].length;});
+  if(!total){msg=note("All these items already exist in STATIONERY and BOOKS. Nothing was added.","ok");render(true);return;}
+  const t0=Date.now().toString(36);
+  try{
+    await db.runTransaction(async t=>{
+      const r=db.doc("meta/codes"),d=await t.get(r),cd=d.exists?{...d.data()}:{};
+      Object.keys(SC).forEach(sc=>{
+        let num=Math.max(cd[sc]||0,maxCode(sc));
+        plan[sc].forEach(([base,v],i)=>{num++;const id="b"+sc[0].toLowerCase()+t0+"_"+i;t.set(db.doc("products/"+id),{id,sec:sc,cat:SC[sc],base,var:v,name:base+" "+v,unit:"",stock:0,cost:0,price:0,mrp:0,ord:100+i,code:CODEP[sc]+String(num).padStart(2,"0")});});
+        cd[sc]=num;
+      });
+      t.set(r,cd);
+      t.set(db.doc("meta/setup"),{books3:true},{merge:true});
+    });
+    const sk=2*BOOKLIST.length-total;
+    msg=note("Added "+plan.STATIONERY.length+" items to STATIONERY and "+plan.BOOKS.length+" items to BOOKS"+(sk?" ("+sk+" already existed and were skipped)":"")+". Now type the stock and prices in the table below.","ok");
+  }catch(e){msg=note("Could not add: "+e.message,"err");}
+  render(true);
+}
 function moveCard(){
   const L=S.products.filter(p=>secOf(p)==="STATIONERY"&&["BOOKS","COPY"].includes(catOf(p)));
   if(user.role!=="admin"||!L.length)return "";
@@ -828,6 +855,7 @@ document.addEventListener("click",e=>{
     db.doc("meta/shop").set({heads},{merge:true}).then(()=>{msg=note("Invoice headings saved.","ok");render(true);}).catch(err);}
   else if(a=="resetheads"){if(confirm("Go back to the original headings?"))db.doc("meta/shop").set({heads:F.delete()},{merge:true}).then(()=>{msg=note("Original headings restored.","ok");render(true);}).catch(err);}
   else if(a=="addcopy")addCopyItems();
+  else if(a=="addbooks2")addBooks2();
   else if(a=="movebooks")moveBooks();
   else if(a=="fillprices")applyPrices();
   else if(a=="mkcodes")mkCodes();
